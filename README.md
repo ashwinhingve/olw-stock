@@ -1,36 +1,73 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Inventory Management System
 
-## Getting Started
+A comprehensive inventory management system built with Next.js and MongoDB. This system provides tools for managing products, tracking stock levels, processing sales and purchases, and monitoring inventory health.
 
-First, run the development server:
+## Features
+
+- **Product Management**: Add, edit, and delete products with detailed information
+- **Stock Tracking**: Real-time tracking of inventory levels
+- **Low Stock Alerts**: Automatic alerts when inventory falls below threshold
+- **Sales & Purchase Management**: Record sales and purchase transactions
+- **Barcode Support**: Generate and scan barcodes for products
+- **Multi-store Support**: Manage inventory across multiple locations
+- **Reporting & Analytics**: Generate reports and visualize data
+
+## Technologies Used
+
+- **Frontend**: Next.js, Tailwind CSS, React Icons
+- **Backend**: Next.js API Routes
+- **Database**: MongoDB with Mongoose
+- **Authentication**: NextAuth.js
+- **UI Components**: Custom components with Tailwind CSS
+
+## Setup Instructions
+
+1. **Clone the repository**
+
+```bash
+git clone https://github.com/yourusername/inventory-management.git
+cd inventory-management
+```
+
+2. **Install dependencies**
+
+```bash
+npm install
+```
+
+3. **Set up environment variables**
+
+Create a `.env.local` file in the root directory with the following variables:
+
+```
+MONGODB_URI=mongodb://localhost:27017/inventory-management
+NEXTAUTH_SECRET=your-secret-key-for-jwt
+NEXTAUTH_URL=http://localhost:3000
+```
+
+4. **Run MongoDB**
+
+Ensure MongoDB is running on your system or use a MongoDB cloud service.
+
+5. **Start the development server**
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The application will be available at [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Demo Credentials
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+For testing purposes, you can use the following demo credentials:
 
-## Learn More
+- **Email**: admin@example.com
+- **Password**: password123
 
-To learn more about Next.js, take a look at the following resources:
+## License
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+MIT
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Credits
 
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Inspired by various inventory management systems including [Stock Register](https://web.stockregister.in).

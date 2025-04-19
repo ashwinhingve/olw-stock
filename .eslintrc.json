@@ -1,0 +1,11 @@
+{
+  "extends": "next/core-web-vitals",
+  "overrides": [
+    {
+      "files": ["lib/mongodb.ts"],
+      "rules": {
+        "no-var": "off"
+      }
+    }
+  ]
+} 
