@@ -1,34 +1,25 @@
 import mongoose from 'mongoose';
 
-// Define the cached connection interface
-interface MongooseCache {
-  conn: typeof mongoose | null;
-  promise: Promise<typeof mongoose> | null;
-}
-
-// Extend NodeJS global type
-declare global {
-  // eslint-disable-next-line no-var
-  var mongoose: MongooseCache | undefined;
-}
-
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/inventory-management';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 if (!MONGODB_URI) {
   throw new Error(
-    'Please define the MONGODB_URI environment variable inside .env.local'
+    'Please define the MONGODB_URI environment variable in .env.local'
   );
 }
 
-// Initialize cache
-const cached: MongooseCache = global.mongoose || { conn: null, promise: null };
+/**
+ * Global is used here to maintain a cached connection across hot reloads
+ * in development. This prevents connections growing exponentially
+ * during API Route usage.
+ */
+let cached = global.mongoose;
 
-// Save cache to global object
-if (!global.mongoose) {
-  global.mongoose = cached;
+if (!cached) {
+  cached = global.mongoose = { conn: null, promise: null };
 }
 
-async function connectToDatabase() {
+export async function connectToDatabase() {
   if (cached.conn) {
     return cached.conn;
   }
@@ -38,9 +29,15 @@ async function connectToDatabase() {
       bufferCommands: false,
     };
 
-    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      return mongoose;
-    });
+    cached.promise = mongoose.connect(MONGODB_URI!, opts)
+      .then((mongoose) => {
+        console.log('Connected to MongoDB');
+        return mongoose;
+      })
+      .catch((error) => {
+        console.error('Error connecting to MongoDB:', error);
+        throw error;
+      });
   }
 
   try {
@@ -53,6 +50,24 @@ async function connectToDatabase() {
   return cached.conn;
 }
 
-// Export as both names for backward compatibility
-export default connectToDatabase;
-export const connectToDB = connectToDatabase; 
+export async function disconnectFromDatabase() {
+  if (cached.conn) {
+    await mongoose.disconnect();
+    cached.conn = null;
+    cached.promise = null;
+    console.log('Disconnected from MongoDB');
+  }
+}
+
+// Simplified connection function for API routes
+export async function connectToDB() {
+  try {
+    await connectToDatabase();
+  } catch (error) {
+    console.error('MongoDB connection error:', error);
+    throw new Error('Failed to connect to database');
+  }
+}
+
+// Default export for backwards compatibility 
+export default connectToDB; 

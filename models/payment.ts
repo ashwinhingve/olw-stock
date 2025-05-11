@@ -1,120 +1,76 @@
 import mongoose from 'mongoose';
 
 const PaymentSchema = new mongoose.Schema({
-  paymentNumber: {
+  reference: {
     type: String,
-    required: [true, 'Payment number is required'],
+    required: true,
     unique: true,
-    trim: true,
-  },
-  type: {
-    type: String,
-    required: [true, 'Payment type is required'],
-    enum: ['incoming', 'outgoing'],
   },
   date: {
     type: Date,
-    required: [true, 'Payment date is required'],
+    required: true,
     default: Date.now,
   },
-  amount: {
-    type: Number,
-    required: [true, 'Amount is required'],
-    min: [0.01, 'Amount must be greater than 0'],
-  },
-  method: {
-    type: String,
-    required: [true, 'Payment method is required'],
-    enum: ['Cash', 'Bank Transfer', 'Credit Card', 'Debit Card', 'Check', 'Online Payment', 'Other'],
-  },
-  reference: {
-    type: String,
-    trim: true,
-  },
-  notes: {
-    type: String,
-    trim: true,
-  },
-  // For incoming payments
   customer: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Customer',
+    required: false,
   },
   customerName: {
     type: String,
-    trim: true,
+    required: true,
   },
-  // For outgoing payments
-  supplier: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Supplier',
+  amount: {
+    type: Number,
+    required: true,
+    min: 0,
   },
-  supplierName: {
+  paymentMethod: {
     type: String,
-    trim: true,
-  },
-  // Related invoice or purchase order
-  invoice: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Invoice',
-  },
-  invoiceNumber: {
-    type: String,
-    trim: true,
-  },
-  purchaseOrder: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'PurchaseOrder',
-  },
-  purchaseOrderNumber: {
-    type: String,
-    trim: true,
+    required: true,
+    enum: ['Cash', 'Bank Transfer', 'Credit Card', 'Check', 'Online Payment', 'Other'],
   },
   status: {
     type: String,
-    required: [true, 'Status is required'],
-    enum: ['Completed', 'Pending', 'Failed', 'Refunded'],
-    default: 'Completed',
+    required: true,
+    enum: ['completed', 'pending', 'failed'],
+    default: 'completed',
+  },
+  invoice: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Invoice',
+    required: false,
+  },
+  invoiceNumber: {
+    type: String,
+    required: false,
+  },
+  notes: {
+    type: String,
+    required: false,
   },
   attachments: [{
-    fileName: {
-      type: String,
-      trim: true,
-    },
-    fileUrl: {
-      type: String,
-      trim: true,
-    },
-    uploadDate: {
-      type: Date,
-      default: Date.now,
-    },
+    name: String,
+    url: String,
+    type: String,
   }],
-  account: {
-    type: String,
-    trim: true,
-  },
-  // Additional fields for record-keeping
-  processedBy: {
-    type: String,
-    trim: true,
-  },
-  transactionId: {
-    type: String,
-    trim: true,
-  },
 }, {
   timestamps: true,
 });
 
-// Pre-save validation for making sure either customer or supplier is provided based on type
-PaymentSchema.pre('validate', function(next) {
-  if (this.type === 'incoming' && !this.customer) {
-    this.invalidate('customer', 'Customer is required for incoming payments');
-  } else if (this.type === 'outgoing' && !this.supplier) {
-    this.invalidate('supplier', 'Supplier is required for outgoing payments');
-  }
-  next();
-});
+// Create compound index for customer + reference for faster lookups
+PaymentSchema.index({ customer: 1, reference: 1 });
+
+// Create index for invoice lookups
+PaymentSchema.index({ invoice: 1 });
+
+// Function to generate unique reference number
+PaymentSchema.statics.generateReference = async function() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const count = await this.countDocuments();
+  return `PMT-${year}${month}${String(count + 1).padStart(4, '0')}`;
+};
 
 export default mongoose.models.Payment || mongoose.model('Payment', PaymentSchema); 

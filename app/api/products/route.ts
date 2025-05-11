@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { connectToDB } from '@/lib/mongodb';
 import Product from '@/models/product';
+import { getUserInfo, createDataFilter, hasPermission } from '@/lib/userContext';
+import { PERMISSIONS } from '@/models/user';
+import { ErrorResponse, QueryParams, TransactionError } from '@/types';
 
 interface ProductQueryFilters {
   category?: string;
-  $or?: Array<Record<string, { $regex: string; $options: string }>>;
+  organization?: string;
+  $or?: Array<Record<string, { $regex: string; $options: string } | string>>;
   $expr?: { $lte: [string, string] };
+  [key: string]: unknown;
 }
 
 interface ValidationError extends Error {
@@ -14,130 +19,166 @@ interface ValidationError extends Error {
   code?: number;
 }
 
-export async function GET(request: NextRequest) {
+export async function GET(req: NextRequest) {
   try {
     await connectToDB();
     
-    const { searchParams } = new URL(request.url);
+    // Verify user has permission to view products
+    const hasViewPermission = await hasPermission(req, PERMISSIONS.VIEW_PRODUCTS);
+    if (!hasViewPermission) {
+      return NextResponse.json(
+        { success: false, error: 'You do not have permission to view products' },
+        { status: 403 }
+      );
+    }
+    
+    // Get user-specific data filter - this enforces data isolation
+    const dataFilter = await createDataFilter(req);
+    
+    // Parse query parameters
+    const { searchParams } = new URL(req.url);
     const category = searchParams.get('category');
-    const search = searchParams.get('search');
     const lowStock = searchParams.get('lowStock');
+    const search = searchParams.get('search');
+    const limit = parseInt(searchParams.get('limit') || '100');
+    const page = parseInt(searchParams.get('page') || '1');
     
-    const query: ProductQueryFilters = {};
+    // Build complete query with user-specific filter
+    const query: ProductQueryFilters = { ...dataFilter };
     
+    // Add category filter if provided
     if (category) {
       query.category = category;
     }
     
+    // Add low stock filter if requested
+    if (lowStock === 'true') {
+      query.$expr = { $lte: ['$quantity', '$lowStockThreshold'] };
+    }
+    
+    // Add search filter if provided
     if (search) {
       query.$or = [
         { name: { $regex: search, $options: 'i' } },
         { sku: { $regex: search, $options: 'i' } },
-        { barcode: { $regex: search, $options: 'i' } }
+        { barcode: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } }
       ];
+      
+      // Ensure $or queries don't break data isolation by adding organization filter to each condition
+      if (query.$or && Array.isArray(query.$or)) {
+        // Add organization filter to each $or condition to maintain isolation
+        query.$or = query.$or.map(condition => ({
+          ...condition,
+          organization: dataFilter.organization
+        }));
+      }
     }
     
-    if (lowStock === 'true') {
-      // Using $expr to compare fields
-      query.$expr = { $lte: ['$quantity', '$lowStockThreshold'] };
-    }
+    // Calculate pagination
+    const skip = (page - 1) * limit;
     
-    const products = await Product.find(query).sort({ createdAt: -1 });
+    // Sanitize and enforce limits
+    const sanitizedLimit = Math.min(Math.max(1, limit), 100); // Between 1 and 100
+    const sanitizedPage = Math.max(1, page);
+    const sanitizedSkip = Math.max(0, (sanitizedPage - 1) * sanitizedLimit);
     
-    return NextResponse.json(products);
+    // Execute query with user-specific data filter
+    const products = await Product.find(query)
+      .sort({ createdAt: -1 })
+      .skip(sanitizedSkip)
+      .limit(sanitizedLimit)
+      .populate('storeId', 'name')
+      .populate('supplierId', 'name');
+    
+    // Get total count for pagination
+    const totalCount = await Product.countDocuments(query);
+    
+    return NextResponse.json({
+      success: true,
+      products,
+      pagination: {
+        total: totalCount,
+        page: sanitizedPage,
+        limit: sanitizedLimit,
+        pages: Math.ceil(totalCount / sanitizedLimit)
+      }
+    });
   } catch (error) {
     console.error('Error fetching products:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch products' },
+      { success: false, error: 'Failed to fetch products' },
       { status: 500 }
     );
   }
 }
 
-export async function POST(request: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     await connectToDB();
     
-    const body = await request.json();
-    
-    // Validate required fields
-    const requiredFields = ['name', 'sku', 'category', 'buyingPrice', 'sellingPrice', 'quantity'];
-    for (const field of requiredFields) {
-      if (body[field] === undefined || body[field] === '') {
-        return NextResponse.json(
-          { error: `${field} is required` },
-          { status: 400 }
-        );
-      }
-    }
-    
-    // Ensure numeric fields are numbers
-    const numericFields = ['buyingPrice', 'sellingPrice', 'quantity', 'lowStockThreshold'];
-    for (const field of numericFields) {
-      if (body[field] !== undefined) {
-        body[field] = Number(body[field]);
-      }
-    }
-    
-    // Set default values if not provided
-    if (body.quantity === undefined) body.quantity = 0;
-    if (body.lowStockThreshold === undefined) body.lowStockThreshold = 10;
-    
-    // Handle empty or invalid store/supplier fields
-    if (!body.store || body.store === '') {
-      delete body.store;
-    }
-    
-    if (!body.supplier || body.supplier === '') {
-      delete body.supplier;
-    }
-    
-    // Check if product with SKU already exists
-    const existingProduct = await Product.findOne({ sku: body.sku });
-    if (existingProduct) {
+    // Verify user has permission to create products
+    const hasCreatePermission = await hasPermission(req, PERMISSIONS.CREATE_PRODUCTS);
+    if (!hasCreatePermission) {
       return NextResponse.json(
-        { error: 'Product with this SKU already exists' },
+        { success: false, error: 'You do not have permission to create products' },
+        { status: 403 }
+      );
+    }
+    
+    // Get user information
+    const userInfo = await getUserInfo(req);
+    
+    if (!userInfo) {
+      return NextResponse.json(
+        { success: false, error: 'Authentication required' },
+        { status: 401 }
+      );
+    }
+    
+    // Parse request body
+    const productData = await req.json();
+    
+    // Sanitize input data
+    delete productData._id; // Prevent ID spoofing
+    
+    // Add user info to the product data
+    productData.userId = userInfo.id;
+    productData.organization = userInfo.organization;
+    productData.lastUpdatedBy = userInfo.id;
+    
+    // Create new product with user and organization data
+    const product = await Product.create(productData);
+    
+    return NextResponse.json({
+      success: true,
+      product
+    }, { status: 201 });
+  } catch (error) {
+    console.error('Error creating product:', error);
+    
+    // Handle duplicate key error
+    const err = error as TransactionError;
+    
+    if (err.code === 11000) {
+      return NextResponse.json(
+        { success: false, error: 'A product with this SKU already exists in your organization' },
         { status: 400 }
       );
     }
     
-    const product = await Product.create(body);
-    
-    return NextResponse.json(product, { status: 201 });
-  } catch (error) {
-    console.error('Error creating product:', error);
-    
-    // Type guard to check if error is an object with expected properties
-    if (error instanceof Error) {
-      // Handle MongoDB validation errors
-      if (error.name === 'ValidationError' && 'errors' in error) {
-        const validationErr = error as ValidationError;
-        const validationErrors = Object.values(validationErr.errors).map(e => e.message);
-        return NextResponse.json(
-          { error: validationErrors.join(', ') },
-          { status: 400 }
-        );
-      }
-      
-      // Handle MongoDB duplicate key errors
-      if ('code' in error && (error as ValidationError).code === 11000) {
-        return NextResponse.json(
-          { error: 'Product with this SKU already exists' },
-          { status: 400 }
-        );
-      }
-      
-      // Handle MongoDB CastError errors (ObjectId issues)
-      if (error.name === 'CastError') {
-        return NextResponse.json(
-          { error: 'Invalid ID format for store or supplier' },
-          { status: 400 }
-        );
-      }
+    // Handle validation errors
+    if (err.name === 'ValidationError') {
+      const validationErr = err as ValidationError;
+      const validationErrors = Object.values(validationErr.errors).map((e) => e.message);
+      return NextResponse.json(
+        { success: false, error: validationErrors.join(', ') },
+        { status: 400 }
+      );
     }
     
     return NextResponse.json(
-      { error: 'Failed to create product' },
+      { success: false, error: 'Failed to create product' },
       { status: 500 }
     );
   }

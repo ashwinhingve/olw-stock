@@ -2,23 +2,24 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useStore } from '@/context/storeContext';
+import { useSession } from 'next-auth/react';
 
 export default function HomePage() {
   const router = useRouter();
-  const { isLoggedIn } = useStore();
+  const { status } = useSession();
   
   useEffect(() => {
-    if (isLoggedIn) {
+    // Only redirect when session status is determined (not loading)
+    if (status === 'loading') return;
+    
+    if (status === 'authenticated') {
       router.push('/dashboard');
-    } else {
+    } else if (status === 'unauthenticated') {
       router.push('/login');
     }
-  }, [isLoggedIn, router]);
+  }, [status, router]);
   
   return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-    </div>
-  );
+  <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
+);
 }

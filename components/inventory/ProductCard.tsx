@@ -76,7 +76,7 @@ export default function ProductCard({ product, onDelete }: ProductCardProps) {
             </div>
             <p className="text-sm text-gray-700">
               <span className={`font-medium ${isLowStock ? 'text-red-600' : 'text-gray-900'}`}>{product.quantity}</span>
-              {' units available'}
+              {' units available&apos;}
             </p>
           </div>
           

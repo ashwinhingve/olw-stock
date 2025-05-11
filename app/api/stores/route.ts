@@ -1,23 +1,28 @@
 import { NextRequest, NextResponse } from 'next/server';
-import connectToDatabase from '@/lib/mongodb';
+import { connectToDatabase } from '@/lib/mongodb';
 import Store from '@/models/store';
 
-export async function GET() {
+// GET endpoint to retrieve all stores
+export async function GET(request: NextRequest) {
   try {
     await connectToDatabase();
     
-    const stores = await Store.find().sort({ name: 1 });
+    const stores = await Store.find({}).sort({ createdAt: -1 });
     
-    return NextResponse.json(stores);
+    return NextResponse.json({ 
+      success: true,
+      stores
+    });
   } catch (error) {
-    console.error('Error fetching stores:', error);
+    console.error('Error in GET /api/stores:', error);
     return NextResponse.json(
-      { error: 'Failed to fetch stores' },
+      { success: false, error: 'Failed to fetch stores' },
       { status: 500 }
     );
   }
 }
 
+// POST endpoint to create a new store
 export async function POST(request: NextRequest) {
   try {
     await connectToDatabase();
@@ -27,27 +32,30 @@ export async function POST(request: NextRequest) {
     // Validate required fields
     if (!body.name) {
       return NextResponse.json(
-        { error: 'Store name is required' },
+        { success: false, error: 'Store name is required' },
         { status: 400 }
       );
     }
     
-    // Check if store with name already exists
-    const existingStore = await Store.findOne({ name: body.name });
-    if (existingStore) {
-      return NextResponse.json(
-        { error: 'Store with this name already exists' },
-        { status: 400 }
-      );
-    }
+    const newStore = new Store({
+      name: body.name,
+      location: body.location || '',
+      manager: body.manager || '',
+      contact: body.contact || '',
+      isActive: body.isActive !== undefined ? body.isActive : true,
+    });
     
-    const store = await Store.create(body);
+    const savedStore = await newStore.save();
     
-    return NextResponse.json(store, { status: 201 });
+    return NextResponse.json({
+      success: true,
+      store: savedStore
+    }, { status: 201 });
+    
   } catch (error) {
-    console.error('Error creating store:', error);
+    console.error('Error in POST /api/stores:', error);
     return NextResponse.json(
-      { error: 'Failed to create store' },
+      { success: false, error: 'Failed to create store' },
       { status: 500 }
     );
   }

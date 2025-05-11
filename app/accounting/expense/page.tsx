@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
 import { 
   PlusIcon, 
@@ -12,53 +12,41 @@ import {
   PencilIcon,
   TrashIcon,
 } from '@heroicons/react/24/outline';
-import Layout from '@/components/ui/Layout';
+
 import { useStore } from '@/context/storeContext';
 import toast from 'react-hot-toast';
+import { useRouter } from 'next/navigation';
 
 // Define Expense interface
 interface Expense {
-  id: string;
+  _id: string;
   date: string;
   category: string;
   description: string;
   amount: number;
   paymentMethod: string;
   reference: string;
-  [key: string]: string | number; // For dynamic field access during sorting
+  notes?: string;
+  [key: string]: string | number | undefined; // For dynamic field access during sorting
 }
 
-// Sample expense data
-const generateExpenseData = (): Expense[] => {
-  const categories = ['Office Supplies', 'Rent', 'Utilities', 'Salaries', 'Marketing', 'Travel', 'Maintenance', 'Other'];
-  const paymentMethods = ['Cash', 'Bank Transfer', 'Credit Card', 'Check', 'Online Payment'];
-  
-  return Array.from({ length: 30 }).map((_, index) => {
-    const date = new Date();
-    date.setDate(date.getDate() - Math.floor(Math.random() * 90)); // Random date in last 90 days
-    
-    return {
-      id: `EXP-${10000 + index}`,
-      date: date.toISOString().split('T')[0],
-      category: categories[Math.floor(Math.random() * categories.length)],
-      description: `Expense for ${categories[Math.floor(Math.random() * categories.length)].toLowerCase()}`,
-      amount: parseFloat((Math.random() * 2000 + 50).toFixed(2)),
-      paymentMethod: paymentMethods[Math.floor(Math.random() * paymentMethods.length)],
-      reference: Math.random() > 0.3 ? `REF-${Math.floor(Math.random() * 10000)}` : '',
-    };
-  });
-};
+// PageWrapper component 
+const PageWrapper = ({ children }) => (
+  <div className="container mx-auto px-4 py-8">{children}</div>
+  );
 
 export default function ExpenseListPage() {
+  const router = useRouter();
   const { isLoading, setLoading } = useStore();
   
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [filteredExpenses, setFilteredExpenses] = useState<Expense[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage] = useState(10);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   
   // Sorting
   const [sortField, setSortField] = useState('date');
@@ -71,75 +59,74 @@ export default function ExpenseListPage() {
     end: ''
   });
   
-  useEffect(() => {
-    const fetchExpenses = async () => {
-      setLoading(true);
-      try {
-        // In a real app, you'd fetch data from your API
-        await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
-        const data = generateExpenseData();
-        setExpenses(data);
-        setFilteredExpenses(data);
-      } catch (error) {
-        console.error('Error fetching expenses:', error);
-        toast.error('Failed to load expense data');
-      } finally {
-        setLoading(false);
+  // Categories list
+  const [categories, setCategories] = useState<string[]>([]);
+  
+  // Fetch expenses from API with pagination, filtering and sorting
+  const fetchExpenses = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      
+      if (searchTerm) {
+        params.append('search', searchTerm);
       }
-    };
-    
+      
+      if (categoryFilter !== 'all') {
+        params.append('category', categoryFilter);
+      }
+      
+      if (dateRangeFilter.start) {
+        params.append('startDate', dateRangeFilter.start);
+      }
+      
+      if (dateRangeFilter.end) {
+        params.append('endDate', dateRangeFilter.end);
+      }
+      
+      // Add sorting parameters
+      params.append('sort', sortField);
+      params.append('order', sortDirection);
+      
+      // Add pagination
+      params.append('page', currentPage.toString());
+      params.append('limit', itemsPerPage.toString());
+      
+      const response = await fetch(`/api/expenses?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! Status: ${response.status}`);
+      }
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        throw new Error(data.error || 'Failed to fetch expenses');
+      }
+      
+      setExpenses(data.expenses);
+      setTotalItems(data.pagination.total);
+      setTotalPages(data.pagination.pages);
+      
+      // Set categories list with 'all&apos; option
+      if (data.categories && data.categories.length) {
+        setCategories(['all', ...data.categories]);
+      }
+    } catch (error) {
+      console.error('Error fetching expenses:', error);
+      const err = error as Error; 
+      toast.error(`Failed to load expenses: ${err.message}`);
+      setExpenses([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [setLoading, searchTerm, categoryFilter, dateRangeFilter, sortField, sortDirection, currentPage, itemsPerPage]);
+  
+  // Initial fetch and when dependencies change
+  useEffect(() => {
     fetchExpenses();
-  }, [setLoading]);
-  
-  // Get unique categories for filter
-  const categories = ['all', ...new Set(expenses.map(expense => expense.category))];
-  
-  // Handle search and filters
-  useEffect(() => {
-    const filtered = expenses.filter(expense => {
-      const matchesSearch = searchTerm === '' || 
-        expense.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        expense.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        expense.reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        expense.category.toLowerCase().includes(searchTerm.toLowerCase());
-      
-      const matchesCategory = categoryFilter === 'all' || expense.category === categoryFilter;
-      
-      const matchesDateRange = (
-        (!dateRangeFilter.start || expense.date >= dateRangeFilter.start) &&
-        (!dateRangeFilter.end || expense.date <= dateRangeFilter.end)
-      );
-      
-      return matchesSearch && matchesCategory && matchesDateRange;
-    });
-    
-    const sorted = [...filtered].sort((a, b) => {
-      if (sortField === 'amount') {
-        return sortDirection === 'asc' 
-          ? a.amount - b.amount 
-          : b.amount - a.amount;
-      }
-      
-      if (sortField === 'date') {
-        return sortDirection === 'asc'
-          ? new Date(a.date).getTime() - new Date(b.date).getTime()
-          : new Date(b.date).getTime() - new Date(a.date).getTime();
-      }
-      
-      const aValue = a[sortField] || '';
-      const bValue = b[sortField] || '';
-      
-      // Convert to string before calling localeCompare
-      const aString = String(aValue);
-      const bString = String(bValue);
-      
-      return sortDirection === 'asc'
-        ? aString.localeCompare(bString)
-        : bString.localeCompare(aString);
-    });
-    
-    setFilteredExpenses(sorted);
-  }, [expenses, searchTerm, sortField, sortDirection, categoryFilter, dateRangeFilter]);
+  }, [fetchExpenses]);
   
   const handleSort = (field: string) => {
     if (sortField === field) {
@@ -148,6 +135,7 @@ export default function ExpenseListPage() {
       setSortField(field);
       setSortDirection('asc');
     }
+    setCurrentPage(1); // Reset to first page on sort change
   };
   
   const getSortIcon = (field: string) => {
@@ -159,12 +147,6 @@ export default function ExpenseListPage() {
       : <ChevronDownIcon className="w-4 h-4 text-blue-600" />;
   };
   
-  // Get current expenses for pagination
-  const indexOfLastItem = currentPage * itemsPerPage;
-  const indexOfFirstItem = indexOfLastItem - itemsPerPage;
-  const currentItems = filteredExpenses.slice(indexOfFirstItem, indexOfLastItem);
-  const totalPages = Math.ceil(filteredExpenses.length / itemsPerPage);
-  
   const handleDeleteExpense = async (id: string) => {
     if (!confirm('Are you sure you want to delete this expense?')) {
       return;
@@ -172,24 +154,39 @@ export default function ExpenseListPage() {
     
     setLoading(true);
     try {
-      // In a real app, you'd make an API call to delete the expense
-      await new Promise(resolve => setTimeout(resolve, 1000)); // Simulate network delay
+      const res = await fetch(`/api/expenses/${id}`, {
+        method: 'DELETE',
+      });
       
-      setExpenses(expenses.filter(expense => expense.id !== id));
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Failed with status: ${res.status}`);
+      }
+      
       toast.success('Expense deleted successfully');
+      fetchExpenses();
+      router.refresh();
     } catch (error) {
       console.error('Error deleting expense:', error);
-      toast.error('Failed to delete expense');
+      const err = error as Error;
+      toast.error(`Failed to delete expense: ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
   
+  // Handle filter form submission
+  const handleFilterSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setCurrentPage(1); // Reset to first page on filter change
+    fetchExpenses();
+  };
+  
   // Calculate total expenses
-  const totalExpenses = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+  const totalExpensesAmount = expenses.reduce((sum, expense) => sum + expense.amount, 0);
   
   return (
-    <Layout>
+    <div className="container mx-auto px-4 py-8">
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Manage Expenses</h1>
@@ -205,7 +202,7 @@ export default function ExpenseListPage() {
         <div className="flex flex-col lg:flex-row gap-6">
           <div className="w-full lg:w-3/4 bg-white shadow rounded-lg overflow-hidden">
             <div className="p-6 border-b border-gray-200">
-              <div className="flex flex-col sm:flex-row gap-4">
+              <form onSubmit={handleFilterSubmit} className="flex flex-col sm:flex-row gap-4">
                 <div className="sm:w-1/2">
                   <label htmlFor="search" className="sr-only">Search</label>
                   <div className="relative rounded-md shadow-sm">
@@ -258,25 +255,33 @@ export default function ExpenseListPage() {
                     />
                   </div>
                 </div>
-              </div>
+                <div className="sm:w-auto self-end pb-1">
+                  <button
+                    type="submit"
+                    className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                  >
+                    Filter
+                  </button>
+                </div>
+              </form>
             </div>
             
             <div className="overflow-x-auto">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
-                      onClick={() => handleSort('id')}
+                      onClick={() => handleSort('_id')}
                     >
                       <div className="flex items-center">
                         ID
-                        <span className="ml-1">{getSortIcon('id')}</span>
+                        <span className="ml-1">{getSortIcon('_id')}</span>
                       </div>
                     </th>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                       onClick={() => handleSort('date')}
                     >
@@ -285,8 +290,8 @@ export default function ExpenseListPage() {
                         <span className="ml-1">{getSortIcon('date')}</span>
                       </div>
                     </th>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                       onClick={() => handleSort('category')}
                     >
@@ -295,8 +300,8 @@ export default function ExpenseListPage() {
                         <span className="ml-1">{getSortIcon('category')}</span>
                       </div>
                     </th>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                       onClick={() => handleSort('description')}
                     >
@@ -305,8 +310,8 @@ export default function ExpenseListPage() {
                         <span className="ml-1">{getSortIcon('description')}</span>
                       </div>
                     </th>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                       onClick={() => handleSort('amount')}
                     >
@@ -315,8 +320,8 @@ export default function ExpenseListPage() {
                         <span className="ml-1">{getSortIcon('amount')}</span>
                       </div>
                     </th>
-                    <th 
-                      scope="col" 
+                    <th
+                      scope="col"
                       className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer"
                       onClick={() => handleSort('paymentMethod')}
                     >
@@ -340,18 +345,18 @@ export default function ExpenseListPage() {
                         </div>
                       </td>
                     </tr>
-                  ) : currentItems.length === 0 ? (
+                  ) : expenses.length === 0 ? (
                     <tr>
                       <td colSpan={7} className="px-6 py-4 text-center text-sm text-gray-500">
-                        No expenses found.
+                        No expenses found. Try adjusting your filters or add new expenses.
                       </td>
                     </tr>
                   ) : (
-                    currentItems.map((expense) => (
-                      <tr key={expense.id} className="hover:bg-gray-50">
+                    expenses.map((expense) => (
+                      <tr key={expense._id} className="hover:bg-gray-50">
                         <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-blue-600 hover:text-blue-800">
-                          <Link href={`/accounting/expense/${expense.id}`}>
-                            {expense.id}
+                          <Link href={`/accounting/expense/${expense._id}`}>
+                            {expense._id.toString().substring(0, 8)}...
                           </Link>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -372,21 +377,21 @@ export default function ExpenseListPage() {
                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                           <div className="flex justify-end items-center space-x-2">
                             <Link
-                              href={`/accounting/expense/${expense.id}`}
+                              href={`/accounting/expense/${expense._id}`}
                               className="text-gray-600 hover:text-gray-900"
                               title="View"
                             >
                               <EyeIcon className="h-5 w-5" />
                             </Link>
                             <Link
-                              href={`/accounting/expense/${expense.id}/edit`}
+                              href={`/accounting/expense/${expense._id}/edit`}
                               className="text-blue-600 hover:text-blue-900"
                               title="Edit"
                             >
                               <PencilIcon className="h-5 w-5" />
                             </Link>
                             <button
-                              onClick={() => handleDeleteExpense(expense.id)}
+                              onClick={() => handleDeleteExpense(expense._id)}
                               className="text-red-600 hover:text-red-900"
                               title="Delete"
                             >
@@ -402,29 +407,31 @@ export default function ExpenseListPage() {
             </div>
             
             {/* Pagination */}
-            {filteredExpenses.length > 0 && (
-              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-                <div className="text-sm text-gray-500">
-                  Showing {indexOfFirstItem + 1} to {Math.min(indexOfLastItem, filteredExpenses.length)} of {filteredExpenses.length} expenses
-                </div>
-                <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
-                    disabled={currentPage === 1}
-                    className="px-3 py-1 border rounded text-sm font-medium text-gray-500 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Previous
-                  </button>
-                  <span className="text-sm text-gray-500">
-                    Page {currentPage} of {totalPages}
-                  </span>
-                  <button
-                    onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
-                    disabled={currentPage === totalPages}
-                    className="px-3 py-1 border rounded text-sm font-medium text-gray-500 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    Next
-                  </button>
+            {totalItems > 0 && (
+              <div className="px-6 py-4 bg-gray-50 border-t border-gray-200">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm text-gray-500">
+                    Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalItems)} of {totalItems} expenses
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <button
+                      onClick={() => setCurrentPage(p => Math.max(p - 1, 1))}
+                      disabled={currentPage === 1}
+                      className="px-3 py-1 border rounded text-sm font-medium text-gray-500 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Previous
+                    </button>
+                    <span className="text-sm text-gray-500">
+                      Page {currentPage} of {totalPages}
+                    </span>
+                    <button
+                      onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))}
+                      disabled={currentPage === totalPages}
+                      className="px-3 py-1 border rounded text-sm font-medium text-gray-500 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Next
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -436,11 +443,11 @@ export default function ExpenseListPage() {
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Total Expenses:</span>
-                  <span className="font-semibold">${totalExpenses.toFixed(2)}</span>
+                  <span className="font-semibold">${totalExpensesAmount.toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-gray-500">Records Found:</span>
-                  <span className="font-semibold">{filteredExpenses.length}</span>
+                  <span className="font-semibold">{totalItems}</span>
                 </div>
                 <div className="border-t border-gray-200 pt-3">
                   <Link
@@ -479,6 +486,6 @@ export default function ExpenseListPage() {
           </div>
         </div>
       </div>
-    </Layout>
+    </div>
   );
 } 

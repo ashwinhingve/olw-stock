@@ -24,7 +24,7 @@ export default function ProductForm({ product, isEditing = false }: ProductFormP
     lowStockThreshold: 10,
     barcode: '',
     store: '',
-    supplier: '',
+    supplier: &apos;',
   });
   
   const [loading, setLoading] = useState(false);

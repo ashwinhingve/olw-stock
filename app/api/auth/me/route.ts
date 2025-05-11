@@ -1,63 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import User from '@/models/user';
-import { connectToDB } from '@/lib/mongodb';
-import jwt, { JwtPayload } from 'jsonwebtoken';
+import { withAuth } from '@/app/api/middleware';
 
-// Define interface for custom JWT payload with id field
-interface CustomJwtPayload extends JwtPayload {
-  id: string;
-}
-
-export async function GET(request: NextRequest) {
+export const GET = withAuth(async (req: NextRequest, user: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
-    await connectToDB();
-    
-    // Get authorization header
-    const authHeader = request.headers.get('authorization');
-    
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized - No token provided' },
-        { status: 401 }
-      );
-    }
-    
-    // Extract token
-    const token = authHeader.split(' ')[1];
-    
-    // Verify token
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-jwt-secret') as CustomJwtPayload;
-    } catch {
-      return NextResponse.json(
-        { success: false, error: 'Unauthorized - Invalid token' },
-        { status: 401 }
-      );
-    }
-    
-    // Get user from database
-    const user = await User.findById(decoded.id).select('-password');
-    
-    if (!user) {
-      return NextResponse.json(
-        { success: false, error: 'User not found' },
-        { status: 404 }
-      );
-    }
-    
-    // Return user data
+    // The user object is already provided by the withAuth middleware
     return NextResponse.json({
       success: true,
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        role: user.role,
-        store: user.store,
-        createdAt: user.createdAt,
-        updatedAt: user.updatedAt
-      }
+      user
     });
   } catch (error) {
     console.error('Error fetching user profile:', error);
@@ -66,4 +15,4 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
-} 
+}); 

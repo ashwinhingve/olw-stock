@@ -61,7 +61,7 @@ export interface User {
 export interface NavigationItem {
   name: string;
   href: string;
-  icon?: any;
+  icon?: any; // eslint-disable-line @typescript-eslint/no-explicit-any // eslint-disable-line @typescript-eslint/no-explicit-any
   children?: NavigationItem[];
   current?: boolean;
 }
@@ -78,4 +78,128 @@ export interface AlertType {
   id: string;
   type: 'error' | 'success' | 'warning' | 'info';
   message: string;
+}
+
+export interface Party {
+  _id?: string;
+  name: string;
+  mobileNumber?: string;
+  openingBalance?: number;
+  balanceType: 'Payable' | 'Receivable';
+  gstNumber?: string;
+  panNumber?: string;
+  billingAddress?: {
+    address?: string;
+    pincode?: string;
+    state?: string;
+  };
+  shippingAddress?: {
+    address?: string;
+    pincode?: string;
+    state?: string;
+  };
+  sameShippingAddress?: boolean;
+  bankDetails?: {
+    accountHolderName?: string;
+    bankName?: string;
+    accountNumber?: string;
+    ifscCode?: string;
+    branchName?: string;
+  };
+  active?: boolean;
+  currentBalance?: number;
+  balanceDisplay?: {
+    amount: number;
+    type: 'Payable' | 'Receivable';
+  };
+}
+
+export type PaymentMethod = 'cash' | 'bank' | 'credit_card' | 'check' | 'other';
+export type PaymentStatus = 'paid' | 'partial' | 'unpaid';
+export type InvoiceStatus = 'draft' | 'pending' | 'completed' | 'cancelled';
+
+export interface InvoiceItem {
+  product: string | Product;
+  name: string;
+  quantity: number;
+  price: number;
+  total: number;
+}
+
+export interface Invoice {
+  _id?: string;
+  invoiceNumber: string;
+  prefix: string;
+  serialNumber: string;
+  date: Date;
+  entryTime: string;
+  party: string | Party;
+  items: InvoiceItem[];
+  subtotal: number;
+  taxRate: number;
+  taxAmount: number;
+  discountAmount: number;
+  total: number;
+  paidAmount: number;
+  dueAmount: number;
+  status: InvoiceStatus;
+  paymentStatus: PaymentStatus;
+  paymentMethod: PaymentMethod;
+  notes?: string;
+  termsAndConditions?: string;
+  paymentHistory?: Array<{
+    date: Date;
+    amount: number;
+    method: PaymentMethod;
+    notes?: string;
+  }>;
+  createdAt?: Date;
+  updatedAt?: Date;
+}
+
+// Error types
+export interface ErrorResponse {
+  error: string;
+  message?: string;
+  status?: number;
+}
+
+// Generic API response types
+export interface ApiResponse<T = unknown> {
+  success: boolean;
+  data?: T;
+  message?: string;
+  error?: string;
+  pagination?: PaginationData;
+}
+
+export interface PaginationData {
+  total: number;
+  pages: number;
+  currentPage: number;
+  limit: number;
+}
+
+// Query types
+export interface QueryParams {
+  [key: string]: string | number | boolean | undefined;
+}
+
+// Common query filter types
+export interface CommonFilters {
+  search?: string;
+  page?: number;
+  limit?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+  startDate?: string;
+  endDate?: string;
+  status?: string;
+}
+
+// Transaction error type
+export interface TransactionError extends Error {
+  code?: number | string;
+  keyPattern?: Record<string, number>;
+  keyValue?: Record<string, unknown>;
 } 

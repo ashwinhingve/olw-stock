@@ -24,7 +24,7 @@ interface StoreContextType {
   
   // Dashboard stats
   dashboardStats: DashboardStats;
-  fetchDashboardStats: () => Promise<void>;
+  fetchDashboardStats: (options?: { period?: string; storeId?: string }) => Promise<void>;
   
   // Products
   products: Product[];
@@ -77,11 +77,62 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   // Suppliers
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   
-  // Check if user is logged in on initial load
+  // Authentication check - only runs once on initial load
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
-      setIsLoggedIn(true);
+    const checkAuthState = async () => {
+      try {
+        // Check if we're on the login or register page (where authentication is not required)
+        const isAuthPage = window.location.pathname === '/login' || window.location.pathname === '/register';
+        
+        // Check if user has manually logged out
+        const hasLoggedOut = localStorage.getItem('loggedOut') === 'true';
+        if (hasLoggedOut) {
+          setIsLoggedIn(false);
+          console.log("StoreContext: User has manually logged out");
+          return;
+        }
+        
+        // Get token from localStorage
+        const token = localStorage.getItem('token');
+        
+        if (!token) {
+          // No token found
+          setIsLoggedIn(false);
+          console.log("StoreContext: No token found, user is not logged in");
+          return;
+        }
+        
+        // Set logged in state immediately based on token presence
+        setIsLoggedIn(true);
+        
+        // Only verify token with API if not on auth pages
+        if (!isAuthPage) {
+          try {
+            // Verify token validity
+            const response = await fetch('/api/auth/verify', {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            
+            if (!response.ok) {
+              // Token is invalid, clear it
+              localStorage.removeItem('token');
+              sessionStorage.removeItem('storeContextInit');
+              setIsLoggedIn(false);
+              console.log("StoreContext: Invalid token detected, clearing login state");
+            }
+          } catch (error) {
+            console.error("StoreContext: Token verification failed:", error);
+          }
+        }
+      } catch (error) {
+        console.error("StoreContext: Error checking authentication:", error);
+        setIsLoggedIn(false);
+      }
+    };
+    
+    // Track if we're in a fresh page load or after page navigation
+    if (typeof window !== 'undefined') {
+      checkAuthState();
     }
   }, []);
   
@@ -98,67 +149,125 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         body: JSON.stringify({ email, password })
       });
       
+      const data = await response.json();
+      
       if (!response.ok) {
-        const data = await response.json();
         throw new Error(data.message || data.error || 'Login failed');
       }
       
-      const data = await response.json();
+      console.log('Login API response successful, setting token');
+      
+      // Store token in local storage
       localStorage.setItem('token', data.token);
+      
+      // Clear the logged out flag
+      localStorage.removeItem('loggedOut');
+      
+      // Update logged in state
       setIsLoggedIn(true);
-      router.push('/dashboard');
-      toast.success('Logged in successfully');
+      
+      // Reset any redirect flags to allow clean navigation
+      sessionStorage.removeItem('redirectAttempted');
+      sessionStorage.removeItem('storeContextInit');
+      
+      // Show success message
+      toast.success('Login successful!');
+      
+      // Return data instead of redirecting here - let the login page handle redirection
+      return data;
     } catch (error) {
       console.error('Login error:', error);
+      
+      // Clear any existing token to be safe
+      localStorage.removeItem('token');
+      setIsLoggedIn(false);
+      
+      // Show error alert
       setAlert({
         id: Date.now().toString(),
         type: 'error',
         message: error instanceof Error ? error.message : 'Invalid credentials'
       });
-      toast.error('Login failed');
-    } finally {
-      setLoading(false);
-    }
-  }, [router]);
-  
-  // Logout function
-  const logout = useCallback(() => {
-    localStorage.removeItem('token');
-    setIsLoggedIn(false);
-    router.push('/login');
-    toast.success('Logged out successfully');
-  }, [router]);
-  
-  // Fetch dashboard stats
-  const fetchDashboardStats = useCallback(async () => {
-    try {
-      setLoading(true);
       
-      const response = await fetch('/api/dashboard/stats');
+      toast.error('Login failed: ' + (error instanceof Error ? error.message : 'Invalid credentials'));
       
-      if (!response.ok) {
-        throw new Error('Failed to fetch dashboard stats');
-      }
-      
-      const data = await response.json();
-      setDashboardStats(data);
-    } catch (error) {
-      console.error('Error fetching dashboard stats:', error);
-      setAlert({
-        id: Date.now().toString(),
-        type: 'error',
-        message: 'Failed to fetch dashboard stats'
-      });
+      throw error;
     } finally {
       setLoading(false);
     }
   }, []);
   
+  // Logout function
+  const logout = useCallback(() => {
+    try {
+      // Clear token and state
+      localStorage.removeItem('token');
+      
+      // Set a flag to prevent automatic re-login
+      localStorage.setItem('loggedOut', 'true');
+      
+      setIsLoggedIn(false);
+      
+      // Clear session storage flags
+      sessionStorage.removeItem('redirectAttempted');
+      sessionStorage.removeItem('storeContextInit');
+      
+      // Show success message
+      toast.success('Logged out successfully!');
+      
+      // Navigate immediately
+      console.log('Redirecting to login page');
+      window.location.href = '/login';
+    } catch (error) {
+      console.error('Logout error:', error);
+      toast.error('Logout failed. Please try again.');
+    }
+  }, []);
+  
+  // Fetch dashboard stats
+  const fetchDashboardStats = useCallback(async (options = {}) => {
+    setLoading(true);
+    try {
+      // Build query parameters
+      const params = new URLSearchParams();
+      if (options.period) params.append('period', options.period);
+      if (currentStore) params.append('storeId', currentStore);
+      
+      // Fetch dashboard stats from API
+      const response = await fetch(`/api/dashboard/stats?${params.toString()}`);
+      
+      if (!response.ok) {
+        throw new Error('Failed to fetch dashboard stats');
+      }
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        // Update all dashboard-related state
+        setDashboardStats({
+          totalProducts: result.data.inventoryMetrics.totalItems || 0,
+          lowStockProducts: result.data.inventoryMetrics.lowStockItems || 0,
+          totalSales: result.data.businessMetrics.totalSales || 0,
+          totalPurchases: result.data.businessMetrics.totalPurchases || 0,
+          monthlyRevenue: result.data.businessMetrics.totalSales || 0
+        });
+        
+        // You might want to add more state setters here as you expand the dashboard
+      } else {
+        throw new Error(result.error || 'Failed to fetch dashboard stats');
+      }
+    } catch (error) {
+      console.error('Error fetching dashboard stats:', error);
+      toast.error('Failed to load dashboard statistics');
+    } finally {
+      setLoading(false);
+    }
+  }, [currentStore]);
+  
   // Fetch products
   const fetchProducts = useCallback(async (params?: Record<string, string>) => {
+    setLoading(true);
     try {
-      setLoading(true);
-      
       let url = '/api/products';
       
       if (params) {
@@ -170,21 +279,29 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
         url += `?${queryParams.toString()}`;
       }
       
+      console.log('Fetching products from:', url);
       const response = await fetch(url);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch products');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch products');
       }
       
       const data = await response.json();
-      setProducts(data);
+      console.log('Products API response:', data);
+      
+      if (data.success) {
+        // Ensure we're setting the products array correctly
+        const productsArray = Array.isArray(data.products) ? data.products : [];
+        console.log(`Setting ${productsArray.length} products to state`);
+        setProducts(productsArray);
+      } else {
+        throw new Error(data.error || 'Failed to fetch products');
+      }
     } catch (error) {
       console.error('Error fetching products:', error);
-      setAlert({
-        id: Date.now().toString(),
-        type: 'error',
-        message: 'Failed to fetch products'
-      });
+      toast.error('Failed to load products data. Please try again later.');
+      setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -192,24 +309,26 @@ export const StoreProvider = ({ children }: { children: ReactNode }) => {
   
   // Fetch stores
   const fetchStores = useCallback(async () => {
+    setLoading(true);
     try {
-      setLoading(true);
-      
       const response = await fetch('/api/stores');
       
       if (!response.ok) {
-        throw new Error('Failed to fetch stores');
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to fetch stores');
       }
       
       const data = await response.json();
-      setStores(data);
+      
+      if (data.success) {
+        setStores(data.stores || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch stores');
+      }
     } catch (error) {
       console.error('Error fetching stores:', error);
-      setAlert({
-        id: Date.now().toString(),
-        type: 'error',
-        message: 'Failed to fetch stores'
-      });
+      toast.error('Failed to load stores data. Please try again later.');
+      setStores([]);
     } finally {
       setLoading(false);
     }

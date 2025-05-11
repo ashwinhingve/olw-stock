@@ -1,143 +1,190 @@
 import mongoose from 'mongoose';
 
 const InvoiceSchema = new mongoose.Schema({
-  invoiceNumber: {
+  reference: {
     type: String,
-    required: [true, 'Invoice number is required'],
+    required: true,
     unique: true,
-    trim: true,
-  },
-  customer: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Customer',
-    required: [true, 'Customer is required'],
-  },
-  customerName: {
-    type: String,
-    required: [true, 'Customer name is required'],
-    trim: true,
   },
   date: {
     type: Date,
-    required: [true, 'Invoice date is required'],
+    required: true,
     default: Date.now,
   },
-  dueDate: {
-    type: Date,
-    required: [true, 'Due date is required'],
+  party: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Party',
+    required: true,
+  },
+  partyName: {
+    type: String,
+    required: true,
+  },
+  purchase: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Purchase',
+    required: false,
+  },
+  purchaseReference: {
+    type: String,
+    required: false,
   },
   items: [{
     product: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Product',
-      required: [true, 'Product is required'],
+      required: true,
     },
     name: {
       type: String,
-      required: [true, 'Product name is required'],
+      required: true,
     },
     quantity: {
       type: Number,
-      required: [true, 'Quantity is required'],
-      min: [1, 'Quantity must be at least 1'],
+      required: true,
+      min: 1,
     },
     price: {
       type: Number,
-      required: [true, 'Price is required'],
-      min: [0, 'Price must be a positive number'],
-    },
-    discount: {
-      type: Number,
-      default: 0,
-      min: [0, 'Discount must be a positive number'],
-    },
-    tax: {
-      type: Number,
-      default: 0,
-      min: [0, 'Tax must be a positive number'],
+      required: true,
+      min: 0,
     },
     total: {
       type: Number,
-      required: [true, 'Total is required'],
-      min: [0, 'Total must be a positive number'],
-    },
+      required: true,
+    }
   }],
   subtotal: {
     type: Number,
-    required: [true, 'Subtotal is required'],
-    min: [0, 'Subtotal must be a positive number'],
-  },
-  taxTotal: {
-    type: Number,
-    required: [true, 'Tax total is required'],
+    required: true,
     default: 0,
-    min: [0, 'Tax total must be a positive number'],
   },
-  discountTotal: {
+  taxRate: {
     type: Number,
-    required: [true, 'Discount total is required'],
+    required: false,
     default: 0,
-    min: [0, 'Discount total must be a positive number'],
+  },
+  taxAmount: {
+    type: Number,
+    required: false,
+    default: 0,
+  },
+  discountAmount: {
+    type: Number,
+    required: false,
+    default: 0,
   },
   total: {
     type: Number,
-    required: [true, 'Total is required'],
-    min: [0, 'Total must be a positive number'],
-  },
-  amountPaid: {
-    type: Number,
+    required: true,
     default: 0,
-    min: [0, 'Amount paid must be a positive number'],
   },
-  balance: {
+  paidAmount: {
     type: Number,
-    required: [true, 'Balance is required'],
-    min: [0, 'Balance must be a positive number'],
+    required: true,
+    default: 0,
+  },
+  dueAmount: {
+    type: Number,
+    required: true,
+    default: 0,
   },
   status: {
     type: String,
-    required: [true, 'Status is required'],
-    enum: ['Paid', 'Unpaid', 'Partial', 'Overdue'],
-    default: 'Unpaid',
+    required: true,
+    enum: ['pending', 'received', 'cancelled'],
+    default: 'pending',
+  },
+  paymentStatus: {
+    type: String,
+    required: true,
+    enum: ['unpaid', 'partial', 'paid'],
+    default: 'unpaid',
   },
   notes: {
     type: String,
-    trim: true,
   },
-  paymentTerms: {
+  attachments: [{
+    name: String,
+    url: String,
     type: String,
-    trim: true,
-  },
-  paymentMethod: {
-    type: String,
-    trim: true,
-  },
+  }],
+  paymentHistory: [{
+    date: {
+      type: Date,
+      required: true,
+      default: Date.now,
+    },
+    amount: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    method: {
+      type: String,
+      required: true,
+      enum: ['cash', 'bank', 'credit_card', 'check', 'other'],
+    },
+    reference: String,
+    notes: String,
+  }]
 }, {
   timestamps: true,
+  toJSON: { virtuals: true },
+  toObject: { virtuals: true }
 });
 
-// Virtual for determining if invoice is overdue
-InvoiceSchema.virtual('isOverdue').get(function() {
-  return this.status !== 'Paid' && new Date(this.dueDate) < new Date();
+// Virtual for due amount calculation
+InvoiceSchema.virtual('due').get(function() {
+  return this.total - this.paidAmount;
 });
 
-// Pre-save hook to update status based on payment 
+// Pre-save hook to calculate totals
 InvoiceSchema.pre('save', function(next) {
-  if (this.amountPaid >= this.total) {
-    this.status = 'Paid';
-    this.balance = 0;
-  } else if (this.amountPaid > 0) {
-    this.status = 'Partial';
-    this.balance = this.total - this.amountPaid;
-  } else {
-    if (new Date(this.dueDate) < new Date()) {
-      this.status = 'Overdue';
-    } else {
-      this.status = 'Unpaid';
+  const invoiceDoc = this as any;
+  
+  // Calculate item totals if not already set
+  invoiceDoc.items.forEach((item: any) => { // eslint-disable-line @typescript-eslint/no-explicit-any // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (!item.total) {
+      item.total = item.quantity * item.price;
     }
-    this.balance = this.total;
+  });
+  
+  // Calculate subtotal
+  invoiceDoc.subtotal = invoiceDoc.items.reduce((sum: number, item: any) => sum + item.total, 0); // eslint-disable-line @typescript-eslint/no-explicit-any // eslint-disable-line @typescript-eslint/no-explicit-any
+  
+  // Calculate tax amount if tax rate is provided
+  if (invoiceDoc.taxRate && invoiceDoc.taxRate > 0) {
+    invoiceDoc.taxAmount = (invoiceDoc.subtotal * invoiceDoc.taxRate) / 100;
+  } else {
+    invoiceDoc.taxAmount = 0;
   }
+  
+  // Calculate final total
+  invoiceDoc.total = invoiceDoc.subtotal + invoiceDoc.taxAmount - (invoiceDoc.discountAmount || 0);
+  
+  // Calculate due amount
+  invoiceDoc.dueAmount = invoiceDoc.total - (invoiceDoc.paidAmount || 0);
+  
+  // Update payment status based on paid amount
+  if (invoiceDoc.paidAmount >= invoiceDoc.total) {
+    invoiceDoc.paymentStatus = 'paid';
+  } else if (invoiceDoc.paidAmount > 0) {
+    invoiceDoc.paymentStatus = 'partial';
+  } else {
+    invoiceDoc.paymentStatus = 'unpaid';
+  }
+  
   next();
 });
+
+// Function to generate unique invoice reference
+InvoiceSchema.statics.generateReference = async function() {
+  const date = new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const count = await this.countDocuments();
+  return `INV-${year}${month}${String(count + 1).padStart(4, '0')}`;
+};
 
 export default mongoose.models.Invoice || mongoose.model('Invoice', InvoiceSchema); 
